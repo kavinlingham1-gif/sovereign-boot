@@ -1,34 +1,111 @@
 #!/bin/bash
-# Sovereign ATX — One-Line Bootstrap
-# Usage: curl -fsSL sovboot.sh | bash -s <customer-id> "<name>"
-set -e
-echo "══════════════════════════════════════"
-echo " Sovereign ATX — Quick Provisioner"
-echo "══════════════════════════════════════"
+# ══════════════════════════════════════════════════════════════════
+# Sovereign ATX — Boot Script v3
+# Run: bash boot.sh <customer-id> "<Name>"
+# Reset keys: bash boot.sh --reset
+# ══════════════════════════════════════════════════════════════════
 
-# Pull keys from ~/.sovereign-keys (created once)
+set -e
+
 KEYFILE="$HOME/.sovereign-keys"
-if [ ! -f "$KEYFILE" ]; then
+GH_REPO="kavinlingham1-gif/sovereign-cluster"
+
+# ── Reset flag ───────────────────────────────────────────────────
+if [ "$1" = "--reset" ]; then
+  rm -f "$KEYFILE"
+  echo "✅ Keys cleared. Run boot.sh again to re-enter."
+  exit 0
+fi
+
+CUSTOMER_ID="${1:?Usage: bash boot.sh <customer-id> \"<Name>\"}"
+CUSTOMER_NAME="${2:-Customer}"
+
+echo ""
+echo "══════════════════════════════════════════════════"
+echo " Sovereign ATX — Provisioning $CUSTOMER_NAME"
+echo "══════════════════════════════════════════════════"
+echo ""
+
+# ── Pre-flight: must be admin ────────────────────────────────────
+if ! groups "$USER" | grep -qw admin; then
+  echo "❌ ERROR: $USER is not an admin."
   echo ""
-  echo "First time? Let's save your keys (one-time setup)."
+  echo "Fix: System Settings → Users & Groups → $USER → check 'Administrator'"
+  echo "Then log out and back in, and re-run this script."
+  exit 1
+fi
+echo "✅ Admin check passed"
+
+# ── Load or collect keys ─────────────────────────────────────────
+load_keys() {
+  source "$KEYFILE"
+  # Validate they're not empty
+  if [ -z "$GH_PAT" ] || [ -z "$TS_KEY" ] || [ -z "$ANT_KEY" ]; then
+    echo "⚠️  Saved keys are incomplete. Re-entering..."
+    rm -f "$KEYFILE"
+    return 1
+  fi
+  return 0
+}
+
+if [ -f "$KEYFILE" ] && load_keys; then
+  echo "✅ Keys loaded from $KEYFILE"
+  echo "   (Run: bash boot.sh --reset  to change keys)"
+else
   echo ""
-  read -p "GitHub PAT (ghp_...): " GH_PAT
-  read -p "Tailscale Auth Key (tskey-auth-...): " TS_KEY
-  read -p "Anthropic API Key (sk-ant-...): " ANT_KEY
+  echo "Enter your three keys (paste each one, hit Enter):"
+  echo ""
+
+  while true; do
+    read -r -p "GitHub PAT (ghp_...): " GH_PAT
+    [[ "$GH_PAT" == ghp_* ]] && break
+    echo "   ❌ Should start with ghp_ — try again"
+  done
+
+  while true; do
+    read -r -p "Tailscale Auth Key (tskey-auth-...): " TS_KEY
+    [[ "$TS_KEY" == tskey-auth-* ]] && break
+    echo "   ❌ Should start with tskey-auth- — try again"
+  done
+
+  while true; do
+    read -r -p "Anthropic API Key (sk-ant-...): " ANT_KEY
+    [[ "$ANT_KEY" == sk-ant-* ]] && break
+    echo "   ❌ Should start with sk-ant- — try again"
+  done
+
+  # Save with proper quoting
   mkdir -p "$(dirname "$KEYFILE")"
-  cat > "$KEYFILE" << EOF
-GH_PAT="$GH_PAT"
-TS_KEY="$TS_KEY"
-ANT_KEY="$ANT_KEY"
-EOF
+  printf 'GH_PAT="%s"\nTS_KEY="%s"\nANT_KEY="%s"\n' "$GH_PAT" "$TS_KEY" "$ANT_KEY" > "$KEYFILE"
   chmod 600 "$KEYFILE"
+  echo ""
   echo "✅ Keys saved to $KEYFILE"
 fi
 
-source "$KEYFILE"
+echo ""
+echo "Fetching provisioner..."
 
-curl -fsSL -H "Authorization: token $GH_PAT" \
-  https://raw.githubusercontent.com/kavinlingham1-gif/sovereign-cluster/main/provision.sh \
-  | TAILSCALE_AUTHKEY="$TS_KEY" \
-    ANTHROPIC_API_KEY="$ANT_KEY" \
-    bash -s "$@"
+# Download provision.sh from private repo
+PROVISION_TMP=$(mktemp /tmp/sovereign-provision.XXXXXX.sh)
+HTTP_CODE=$(curl -fsSL \
+  -H "Authorization: token $GH_PAT" \
+  -o "$PROVISION_TMP" \
+  -w "%{http_code}" \
+  "https://raw.githubusercontent.com/$GH_REPO/main/provision.sh")
+
+if [ "$HTTP_CODE" != "200" ]; then
+  echo "❌ Failed to fetch provision.sh (HTTP $HTTP_CODE)"
+  echo "   Check your GitHub PAT has 'repo' scope."
+  rm -f "$PROVISION_TMP"
+  exit 1
+fi
+
+echo "✅ Provisioner downloaded"
+echo ""
+
+# Run it
+TAILSCALE_AUTHKEY="$TS_KEY" \
+ANTHROPIC_API_KEY="$ANT_KEY" \
+  bash "$PROVISION_TMP" "$CUSTOMER_ID" "$CUSTOMER_NAME"
+
+rm -f "$PROVISION_TMP"
