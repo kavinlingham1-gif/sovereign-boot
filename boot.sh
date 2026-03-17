@@ -1,7 +1,8 @@
 #!/bin/bash
 # ══════════════════════════════════════════════════════════════════
-# Sovereign ATX — Boot Script v3
+# Sovereign ATX — Boot Script v4
 # Run: bash boot.sh <customer-id> "<Name>"
+# Mini mode (no Anthropic key): GH_PAT=... TS_KEY=... bash boot.sh <id> "<Name>"
 # Reset keys: bash boot.sh --reset
 # ══════════════════════════════════════════════════════════════════
 
@@ -36,50 +37,50 @@ if ! groups "$USER" | grep -qw admin; then
 fi
 echo "✅ Admin check passed"
 
-# ── Load or collect keys ─────────────────────────────────────────
-load_keys() {
-  source "$KEYFILE"
-  # Validate they're not empty
-  if [ -z "$GH_PAT" ] || [ -z "$TS_KEY" ] || [ -z "$ANT_KEY" ]; then
-    echo "⚠️  Saved keys are incomplete. Re-entering..."
-    rm -f "$KEYFILE"
-    return 1
-  fi
-  return 0
-}
-
-if [ -f "$KEYFILE" ] && load_keys; then
-  echo "✅ Keys loaded from $KEYFILE"
-  echo "   (Run: bash boot.sh --reset  to change keys)"
+# ── If keys passed as env vars, skip prompts ─────────────────────
+if [ -n "$GH_PAT" ] && [ -n "$TS_KEY" ]; then
+  echo "✅ Keys loaded from environment"
+  ANT_KEY="${ANT_KEY:-}"
 else
-  echo ""
-  echo "Enter your three keys (paste each one, hit Enter):"
-  echo ""
+  # ── Load or collect keys ───────────────────────────────────────
+  load_keys() {
+    source "$KEYFILE"
+    if [ -z "$GH_PAT" ] || [ -z "$TS_KEY" ]; then
+      echo "⚠️  Saved keys are incomplete. Re-entering..."
+      rm -f "$KEYFILE"
+      return 1
+    fi
+    return 0
+  }
 
-  while true; do
-    read -r -p "GitHub PAT (ghp_...): " GH_PAT
-    [[ "$GH_PAT" == ghp_* ]] && break
-    echo "   ❌ Should start with ghp_ — try again"
-  done
+  if [ -f "$KEYFILE" ] && load_keys; then
+    echo "✅ Keys loaded from $KEYFILE"
+    echo "   (Run: bash boot.sh --reset  to change keys)"
+  else
+    echo ""
+    echo "Enter your keys (paste each one, hit Enter):"
+    echo ""
 
-  while true; do
-    read -r -p "Tailscale Auth Key (tskey-auth-...): " TS_KEY
-    [[ "$TS_KEY" == tskey-auth-* ]] && break
-    echo "   ❌ Should start with tskey-auth- — try again"
-  done
+    while true; do
+      read -r -p "GitHub PAT (ghp_...): " GH_PAT
+      [[ "$GH_PAT" == ghp_* ]] && break
+      echo "   ❌ Should start with ghp_ — try again"
+    done
 
-  while true; do
-    read -r -p "Anthropic API Key (sk-ant-...): " ANT_KEY
-    [[ "$ANT_KEY" == sk-ant-* ]] && break
-    echo "   ❌ Should start with sk-ant- — try again"
-  done
+    while true; do
+      read -r -p "Tailscale Auth Key (tskey-auth-...): " TS_KEY
+      [[ "$TS_KEY" == tskey-auth-* ]] && break
+      echo "   ❌ Should start with tskey-auth- — try again"
+    done
 
-  # Save with proper quoting
-  mkdir -p "$(dirname "$KEYFILE")"
-  printf 'GH_PAT="%s"\nTS_KEY="%s"\nANT_KEY="%s"\n' "$GH_PAT" "$TS_KEY" "$ANT_KEY" > "$KEYFILE"
-  chmod 600 "$KEYFILE"
-  echo ""
-  echo "✅ Keys saved to $KEYFILE"
+    read -r -p "Anthropic API Key (sk-ant-... or Enter to skip): " ANT_KEY
+
+    mkdir -p "$(dirname "$KEYFILE")"
+    printf 'GH_PAT="%s"\nTS_KEY="%s"\nANT_KEY="%s"\n' "$GH_PAT" "$TS_KEY" "$ANT_KEY" > "$KEYFILE"
+    chmod 600 "$KEYFILE"
+    echo ""
+    echo "✅ Keys saved to $KEYFILE"
+  fi
 fi
 
 echo ""
